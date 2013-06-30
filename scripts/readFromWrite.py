@@ -1,5 +1,5 @@
 # Read node generator v1.2, 2011-11-21
-# by Fredrik Averpil, fredrik.averpil [at] gmail.com, www.averpil.com/fredrik
+# by Fredrik Averpil, fredrik.averpil [at] gmail.com, http://fredrikaverpil.tumblr.com
 # 
 #
 # Usage: select any Write node and run readFromWrite() after having sourced this file, or put the following in your menu.py:
