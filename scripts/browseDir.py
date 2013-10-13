@@ -1,4 +1,4 @@
-# Browse Directory v1.0, 2011-11-12
+# Browse Directory v1.1, 2013-10-13
 # by Fredrik Averpil, fredrik.averpil [at] gmail.com, http://fredrikaverpil.tumblr.com
 # 
 #
