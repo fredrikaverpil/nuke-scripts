@@ -18,7 +18,7 @@
 # nuke.menu( 'Nuke' ).addCommand( 'My file menu/Browse/Scripts folder', "browseDir.browseDir('shot')" )
 #
 #
- 
+
 
 
 import nuke
@@ -30,9 +30,9 @@ def launch(directory):
 	print('Attempting to open folder: ' + directory)
 	if os.path.exists( directory ):
 		if(sys.platform == 'win32'):
-			os.system('start ' + directory)
+			os.system('start "' + directory + '"')
 		elif(sys.platform == 'darwin'):
-			os.system('open ' + directory)
+			os.system('open "' + directory + '"')
 	else:
 		nuke.message('Path does not exist:\n' + directory)
 
@@ -52,16 +52,8 @@ def browseDirByNode():
 		nuke.message('You must select a Read node or a Write node.')
 
 	if error == False:
-		filePathSplitted = str.split( selectedNodeFilePath, '/' )
-		
-		dirFromNode = ''
-		for i in range(0, ( len(filePathSplitted)-1) ):
-			dirFromNode = dirFromNode + filePathSplitted[i] + '/'
-
-		# Debug
-		#print('Directory: ' + dirFromNode)
-
-		launch(dirFromNode)
+		folderPath = selectedNodeFilePath[ : selectedNodeFilePath.rfind('/') ]
+		launch(folderPath)
 
 
 # File menu browseDir
