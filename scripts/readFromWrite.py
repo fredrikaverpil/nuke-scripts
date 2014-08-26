@@ -1,10 +1,10 @@
-# Read node generator v1.2, 2011-11-21
-# by Fredrik Averpil, fredrik.averpil [at] gmail.com, http://fredrikaverpil.tumblr.com
+# Read node generator v1.3, 2014-08-26
+# by Fredrik Averpil, fredrik.averpil [at] gmail.com, www.averpil.com/fredrik
 # 
 #
 # Usage: select any Write node and run readFromWrite() after having sourced this file, or put the following in your menu.py:
-# import writeNode
-# nuke.menu( 'Nuke' ).addCommand( 'My file menu/Write node generator', 'writeNode.writeNode()', 'shift+w' )
+# import readFromWrite
+# nuke.menu( 'Nuke' ).addCommand( 'Read from Write', 'readFromWrite.readFromWrite()', 'shift+r' )
 # 
 # 
 
@@ -26,9 +26,40 @@ def searchForInString(string, searchPattern):
 
 
 
+def evaluate_filepath():
+	# Fetch the filename as-is (possibly containing expressions)
+	selectedNodeFilePathRAW = nuke.selectedNode()['file'].getValue()
+	padding = '%04d'
+	file_extension = os.path.splitext(selectedNodeFilePathRAW)[1]
+	filepath_to_evaluate = ''
+	
+	# Are we using a padding? - if so, lets not evaluate that
+	padding_in_use = False
+	if padding in selectedNodeFilePathRAW:
+		padding_in_use = True
+	
+	if padding_in_use:
+		# Temporarily remove padding and file type extension from Write node
+		filepath_to_evaluate = selectedNodeFilePathRAW[ : selectedNodeFilePathRAW.rfind(padding) ]
+		nuke.selectedNode()['file'].setValue( filepath_to_evaluate )
+		
+	# Evaluate filepath in Write node      
+	filepath_evaluated = nuke.selectedNode()['file'].evaluate()
+	
+	if padding_in_use:
+		# Put back padding and file type extension into evaluated filepath of Write node
+		filepath_evaluated = filepath_evaluated + padding + file_extension
+		nuke.selectedNode()['file'].setValue( filepath_evaluated )
+
+
+	return filepath_evaluated
+
+
+
+
 def checkForFileKnob():
 	try:
-		selectedNodeFilePath = nuke.selectedNode()['file'].getValue()
+		selectedNodeFilePath = nuke.selectedNode()['file'].evaluate()
 		error = False
 	except ValueError:
 		error = True
@@ -52,10 +83,9 @@ def readFromWrite():
 	# If a Write node has been selected, let's go on!
 	if not error:
 
-
 		# Grab the interesting stuff from the write node and double check we actually selected a Write node...
 		selectedNodeName = nuke.selectedNode().name()
-		selectedNodeFilePath = nuke.selectedNode()['file'].getValue()
+		selectedNodeFilePath = evaluate_filepath()
 		selectedNodePremult = str( nuke.selectedNode()['premultiplied'].getValue() )
 		selectedNodeXpos = nuke.selectedNode().xpos()
 		selectedNodeYpos = nuke.selectedNode().ypos()
@@ -131,12 +161,12 @@ def readFromWrite():
 					# Search for the occurance of a four digit number surrounded by period signs
 					reMatch = re.search('\.[0-9][0-9][0-9][0-9]\.', file)
 					if reMatch:
-						# print('reMatch for ' + file + ': ' + str(reMatch) + ': ' + reMatch.group(0) )				
+						# print('reMatch for ' + file + ': ' + str(reMatch) + ': ' + reMatch.group(0) )                
 						targetPrefix, targetSuffix = file.split(reMatch.group(0))
 
 						if sourcePrefix == targetPrefix:
 							fileFound = True
-							framerangeFound = True	
+							framerangeFound = True    
 							# print(file + ' seems to be related to filename ' + sourcePrefix + '.####.' + sourceSuffix)
 
 							dump, frame, dump = reMatch.group(0).split('.')
@@ -190,3 +220,4 @@ def readFromWrite():
 				# If no framerange was found from an image sequence
 				elif framerangeFound == False:
 					nuke.message('I was unable to figure out the frame range and guessed it was ' + firstFrame + '-' + lastFrame + ', based on the project settings. Please check it manually.')
+
