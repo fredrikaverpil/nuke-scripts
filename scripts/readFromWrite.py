@@ -1,5 +1,5 @@
-# Read node generator v1.3, 2014-08-26
-# by Fredrik Averpil, fredrik.averpil [at] gmail.com, www.averpil.com/fredrik
+# Read node generator v1.4, 2014-08-26
+# by Fredrik Averpil, fredrik.averpil [at] gmail.com, http://fredrikaverpil.tumblr.com
 # 
 #
 # Usage: select any Write node and run readFromWrite() after having sourced this file, or put the following in your menu.py:
@@ -29,31 +29,21 @@ def searchForInString(string, searchPattern):
 def evaluate_filepath():
 	# Fetch the filename as-is (possibly containing expressions)
 	selectedNodeFilePathRAW = nuke.selectedNode()['file'].getValue()
+	selectedNodeFilePathEvaluated = nuke.selectedNode()['file'].getEvaluatedValue()
 	padding = '%04d'
 	file_extension = os.path.splitext(selectedNodeFilePathRAW)[1]
-	filepath_to_evaluate = ''
-	
-	# Are we using a padding? - if so, lets not evaluate that
-	padding_in_use = False
-	if padding in selectedNodeFilePathRAW:
-		padding_in_use = True
-	
-	if padding_in_use:
-		# Temporarily remove padding and file type extension from Write node
-		filepath_to_evaluate = selectedNodeFilePathRAW[ : selectedNodeFilePathRAW.rfind(padding) ]
-		nuke.selectedNode()['file'].setValue( filepath_to_evaluate )
-		
-	# Evaluate filepath in Write node      
-	filepath_evaluated = nuke.selectedNode()['file'].evaluate()
-	
-	if padding_in_use:
-		# Put back padding and file type extension into evaluated filepath of Write node
-		filepath_evaluated = filepath_evaluated + padding + file_extension
-		nuke.selectedNode()['file'].setValue( filepath_evaluated )
+	filepath_evaluated = selectedNodeFilePathEvaluated
 
+	if '%04d' in selectedNodeFilePathRAW:
+		# If padding was used, we want to make sure that the new path says #### and not e.g. 0140.
+		match = re.search( '\.\d*'+file_extension, selectedNodeFilePathEvaluated)
+		if match:
+			e = selectedNodeFilePathEvaluated
+			e = e[ : e.rfind(match.group(0)) ]
+			e = e + '.%04d' + file_extension
+			filepath_evaluated = e
 
 	return filepath_evaluated
-
 
 
 
@@ -75,6 +65,7 @@ def checkForFileKnob():
 
 # Creates a Read node from the selected Write node
 def readFromWrite():
+	print 'executing script'
 
 	# Check for a file knob...
 	error = checkForFileKnob()
@@ -86,6 +77,7 @@ def readFromWrite():
 		# Grab the interesting stuff from the write node and double check we actually selected a Write node...
 		selectedNodeName = nuke.selectedNode().name()
 		selectedNodeFilePath = evaluate_filepath()
+		#selectedNodeFilePath = evaluate_filepath_stalker( filepath_evaluated=selectedNodeFilePath )
 		selectedNodePremult = str( nuke.selectedNode()['premultiplied'].getValue() )
 		selectedNodeXpos = nuke.selectedNode().xpos()
 		selectedNodeYpos = nuke.selectedNode().ypos()
