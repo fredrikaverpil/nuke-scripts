@@ -1,215 +1,226 @@
-# Read node generator v1.4, 2014-08-26
-# by Fredrik Averpil, fredrik.averpil [at] gmail.com, http://fredrikaverpil.tumblr.com
-# 
-#
-# Usage: select any Write node and run readFromWrite() after having sourced this file, or put the following in your menu.py:
-# import readFromWrite
-# nuke.menu( 'Nuke' ).addCommand( 'Read from Write', 'readFromWrite.readFromWrite()', 'shift+r' )
-# 
-# 
+"""readFromWrite
+Read node generator v2.0, 2016-05-23
 
+What's new in v2.0:
+- Completely rewritten from scratch
+- Improved detection of frame range
+- Supports any padding format (not only %04d)
+- Applies colorspace to Read node
+- Supports not only Write nodes (see FILEPATH_KNOBS variable)
+- Supports definition of "single file image sequence" formats
+- PEP8 compliant!
 
+Usage:
+Select any Write node and run ReadFromWrite() after having sourced this
+file, or put the following in your menu.py:
 
-import nuke
+import readFromWrite
+nuke.menu('Nuke').addCommand('Read from Write',
+                             'readFromWrite.ReadFromWrite()',
+                             'shift+r')
+Please note:
+Script is now started via ReadFromWrite() instead of the old
+readfromWrite() function, so you'll have to update your scripts if you
+are updating from a 1.x version.
+"""
+
 import os
 import re
+import glob
+
+import nuke
 
 
-def searchForInString(string, searchPattern):
-	# Look for %04d
-	reMatch = re.search(searchPattern, string)
-	# if reMatch:
-		# print('reMatch for ' + string + ': ' + str(reMatch) )
-	
-	return reMatch
+# Settings
+#
+# knob names to use (from any node) as a base for Read node creation.
+FILEPATH_KNOBS = ['file']
+#
+# This scripts needs to know whether to apply padding to a filepath
+# or keep it without padding. Movie files should not have padding,
+# for example. Add such "single file formats" here.
+SINGLE_FILE_FORMATS = ['mov', 'mp4', 'mpeg4']
 
 
+class ReadFromWrite(object):
+    """Main class
+    """
+    def __init__(self):
+        """Main function
+        """
+        super(ReadFromWrite, self).__init__()
+        nodes = self.get_selected_valid_nodes()
+        node_data = self.gather_node_data(nodes)
+        self.create_read_nodes(node_data)
 
+    def get_selected_valid_nodes(self):
+        """Return list of nodes which should have Read nodes creaeted
+        for them.
+        """
+        valid_nodes = []
+        selected_nodes = nuke.selectedNodes()
+        for node in selected_nodes:
+            for k in FILEPATH_KNOBS:
+                if not isinstance(node.knob(k), type(None)):
+                    valid_nodes.append(node.name())  # contains allowed knob
+        return valid_nodes
 
-def evaluate_filepath():
-	# Fetch the filename as-is (possibly containing expressions)
-	selectedNodeFilePathRAW = nuke.selectedNode()['file'].getValue()
-	selectedNodeFilePathEvaluated = nuke.selectedNode()['file'].getEvaluatedValue()
-	padding = '%04d'
-	file_extension = os.path.splitext(selectedNodeFilePathRAW)[1]
-	filepath_evaluated = selectedNodeFilePathEvaluated
+    def gather_node_data(self, nodes):
+        """ Process the nodes and generate a dictionary of information
+        which will be used to create the Read nodes.
+        """
+        data = {}
+        for node in nodes:
+            data[node] = {}
+            for knob_name in FILEPATH_KNOBS:
+                knob_value = nuke.toNode(node).knob(knob_name).getValue()
+                knob_eval = nuke.toNode(node).knob(knob_name).evaluate()
+                filepath = self.get_filepath(node, knob_value, knob_eval)
+                if not isinstance(filepath, type(None)):
+                    seq_info = self.frame_info(node, knob_value, knob_eval)
+                    data[node][knob_name] = seq_info
+        return data
 
-	if '%04d' in selectedNodeFilePathRAW:
-		# If padding was used, we want to make sure that the new path says #### and not e.g. 0140.
-		match = re.search( '\.\d*'+file_extension, selectedNodeFilePathEvaluated)
-		if match:
-			e = selectedNodeFilePathEvaluated
-			e = e[ : e.rfind(match.group(0)) ]
-			e = e + '.%04d' + file_extension
-			filepath_evaluated = e
+    def combined_relative_filepath_exists(self, relative_filepath,
+                                          return_filepath=False):
+        """Combine the project directory with the filepath to get a
+        existing filepath.
+        If the option "return_filepath" is given, the combined
+        filepath will get returned.
+        """
+        project_dir_value = nuke.root().knob('project_directory').getValue()
+        if not os.path.exists(project_dir_value):
+            project_dir = nuke.root().knob('project_directory').evaluate()
+        filepath = os.path.join(project_dir, relative_filepath)
+        filetype = filepath.split('.')[-1]
+        frame_number = re.findall(r'\d+', filepath)[-1]
+        basename = filepath[: filepath.rfind(frame_number)]
+        filepath_glob = basename + '*' + filetype
+        glob_search_results = glob.glob(filepath_glob)
+        if len(glob_search_results) > 0:
+            if return_filepath:
+                return filepath
+            else:
+                return True
+        else:
+            if return_filepath:
+                return None
+            else:
+                return False
 
-	return filepath_evaluated
+    def get_filepath(self, node, knob_value, knob_eval):
+        """Detect the filepath of a knob. Supports scripted
+        and/or relative filepaths.
+        """
+        filepath = None
+        if os.path.exists(knob_value):
+            filepath = knob_value
+        elif os.path.exists(knob_eval):
+            filepath = knob_eval
+        elif self.combined_relative_filepath_exists(knob_eval):
+            filepath = self.combined_relative_filepath_exists(
+                            knob_eval,
+                            return_filepath=True)
+        return filepath
 
+    def frame_info(self, node, knob_value, knob_eval):
+        """Returns all information required to create a Read node.
+        """
+        filepath = self.get_filepath(node, knob_value, knob_eval)
+        current_frame = re.findall(r'\d+', filepath)[-1]
+        padding = len(current_frame)
+        basename = filepath[: filepath.rfind(current_frame)]
+        filetype = filepath.split('.')[-1]
+        firstframe = None
+        lastframe = None
 
+        # First and last frame from Read node
+        if nuke.toNode(node).Class() == 'Read':
+            firstframe = int(nuke.toNode(node).knob('first').getValue())
+            lastframe = int(nuke.toNode(node).knob('last').getValue())
 
-def checkForFileKnob():
-	try:
-		selectedNodeFilePath = nuke.selectedNode()['file'].evaluate()
-		error = False
-	except ValueError:
-		error = True
-		nuke.message('No (Write) node selected.')
-	except NameError:
-		error = True
-		nuke.message('You must select a Write node.')
-	
-	return error
+        # Check on disk for number of frames
+        frames = []
+        filepath_glob = basename + '*' + filetype
+        glob_search_results = glob.glob(filepath_glob)
+        for f in glob_search_results:
+            frame = re.findall(r'\d+', f)[-1]
+            frames.append(frame)
+        frames = sorted(frames)
 
+        # First and last frame from glob search
+        if isinstance(firstframe, type(None)):
+            firstframe = frames[0]
+        if isinstance(lastframe, type(None)):
+            lastframe = frames[len(frames)-1]
+            if lastframe < 0:
+                lastframe = firstframe
 
+        # Filepath, depending on if it is a single file or if it is
+        # a sequence
+        if filetype in SINGLE_FILE_FORMATS:
+            # Movie file
+            filepath_processed = filepath
+        else:
+            # Image sequence
+            filepath_processed = basename + '#'*padding + '.' + filetype
 
+        # If filepath was relative, keep it that way
+        if './' in filepath:
+            filepath_processed = filepath_processed[filepath.rfind('./'):]
 
-# Creates a Read node from the selected Write node
-def readFromWrite():
-	print 'executing script'
+        # Color space
+        colorspace = None
+        if not isinstance(nuke.toNode(node).knob('colorspace'), type(None)):
+            colorspace = nuke.toNode(node).knob('colorspace').getValue()
 
-	# Check for a file knob...
-	error = checkForFileKnob()
+        # Premultiplied
+        premultiplied = None
+        if not isinstance(nuke.toNode(node).knob('premultiplied'), type(None)):
+            premultiplied = nuke.toNode(node).knob('premultiplied').getValue()
 
+        frame_data = {
+                    'filepath': filepath_processed,
+                    'firstframe': firstframe,
+                    'lastframe': lastframe,
+                    'colorspace': colorspace,
+                    'premultiplied': premultiplied
+                    }
 
-	# If a Write node has been selected, let's go on!
-	if not error:
+        return frame_data
 
-		# Grab the interesting stuff from the write node and double check we actually selected a Write node...
-		selectedNodeName = nuke.selectedNode().name()
-		selectedNodeFilePath = evaluate_filepath()
-		#selectedNodeFilePath = evaluate_filepath_stalker( filepath_evaluated=selectedNodeFilePath )
-		selectedNodePremult = str( nuke.selectedNode()['premultiplied'].getValue() )
-		selectedNodeXpos = nuke.selectedNode().xpos()
-		selectedNodeYpos = nuke.selectedNode().ypos()
+    def create_read_nodes(self, data):
+        """Creates the Read node(s).
+        """
+        for node in data:
+            for knob in data[node]:
+                filepath = data[node][knob]['filepath']
+                filetype = filepath.split('.')[-1]
+                firstframe = int(data[node][knob]['firstframe'])
+                lastframe = int(data[node][knob]['lastframe'])
 
-		# Split filepath into list
-		filePathSplitted = str.split( selectedNodeFilePath, '/' )
+                r = nuke.createNode('Read')
 
-		# Get filetype
-		filePathSplittedDots = str.split( selectedNodeFilePath, '.' )
-		filetype = filePathSplittedDots[len(filePathSplittedDots)-1]
-		
-		filePath = ''
-		# File path to write node's target folder
-		for i in range(0,len(filePathSplitted)-1):
-			filePath = filePath + filePathSplitted[i] + '/'
+                if filetype in SINGLE_FILE_FORMATS:
+                    # Movie file
+                    r.knob(knob).fromUserText(filepath)
+                else:
+                    # Image sequence
+                    r.knob(knob).setValue(filepath)
+                    r.knob('first').setValue(firstframe)
+                    r.knob('last').setValue(lastframe)
 
-		# Filename taken from Write node
-		filename = filePathSplitted[ len(filePathSplitted)-1 ]
+                if not isinstance(nuke.toNode(node).knob('colorspace'),
+                                  type(None)):
+                    colorspace = str(data[node][knob]['colorspace'])
+                    r.knob('colorspace').setValue(colorspace)
+                if not isinstance(nuke.toNode(node).knob('premultiplied'),
+                                  type(None)):
+                    premultiplied = str(data[node][knob]['premultiplied'])
+                    r.knob('premultiplied').setValue(premultiplied)
 
-		# Debug
-		# print('Write node says: ' + filename)
-
-		# Let's look for #### or %04d
-		searchPattern = '(#+)|(%\d\d?d)'
-		frameRangeFound = searchForInString(filename, searchPattern)
-
-		# If framerange was not found we assume we are dealing with a movie file or a single image file
-		if not frameRangeFound:
-			# Create the read node
-			node = nuke.createNode( "Read", "file "+selectedNodeFilePath )
-			
-			# Nicely placement of nodes
-			node.setXpos( selectedNodeXpos )
-			node.setYpos( selectedNodeYpos + 60)
-
-			# Was it premultiplied?
-			node.knob('premultiplied').fromScript( selectedNodePremult )
-		
-
-
-		# If framerange was found, we need to start getting clever
-		else:
-
-			# Split the filname into what's before and after the framerange
-			sourcePrefix, sourceSuffix = filename.split('.%04d.')
-
-			# Debug
-			# print('We are looking for: ' + sourcePrefix + ' of type ' + filetype)
-			# print('Look for them in directory: ' + filePath)
-
-			
-			# See if we can list the folder's files
-			if os.path.exists( nuke.callbacks.filenameFilter(filePath) ):
-				# List the contents of the folder
-				files = os.listdir( nuke.callbacks.filenameFilter(filePath) )
-			else:
-				nuke.message('Folder path not found:\n' + filePath)
-				error = True
-
-
-			# Setting some defaults
-			framerangeFound = False
-			firstFrame = 'Not set'
-			lastFrame = 'Not set'
-			fileFound = False
-
-
-
-			if error == False:
-				
-				for file in files:
-
-					# Search for the occurance of a four digit number surrounded by period signs
-					reMatch = re.search('\.[0-9][0-9][0-9][0-9]\.', file)
-					if reMatch:
-						# print('reMatch for ' + file + ': ' + str(reMatch) + ': ' + reMatch.group(0) )                
-						targetPrefix, targetSuffix = file.split(reMatch.group(0))
-
-						if sourcePrefix == targetPrefix:
-							fileFound = True
-							framerangeFound = True    
-							# print(file + ' seems to be related to filename ' + sourcePrefix + '.####.' + sourceSuffix)
-
-							dump, frame, dump = reMatch.group(0).split('.')
-
-							if firstFrame == 'Not set':
-								firstFrame = frame
-							else:
-								lastFrame = frame
-
-
-
-				if fileFound == True:
-
-					# Change %04d to ####
-					selectedNodeFilePath = str.replace(selectedNodeFilePath, '%04d', '####')
-
-					# Create the Read node
-					node = nuke.createNode( "Read", "file " + selectedNodeFilePath)
-
-					# Check for framerange, and if not found use the frameranges from the project settings
-					if framerangeFound == False:
-						# Long shot guess for framerange (from settings)
-						firstFrame = str(int(nuke.root()['first_frame'].getValue()))
-						lastFrame = str(int(nuke.root()['last_frame'].getValue()))
-						node.knob('first').fromScript(firstFrame)
-						node.knob('last').fromScript(lastFrame)
-
-					# Set the framerange
-					node.knob('first').fromScript(firstFrame)
-					node.knob('last').fromScript(lastFrame)
-
-					# Nicely placement of nodes
-					node.setXpos( selectedNodeXpos )
-					node.setYpos( selectedNodeYpos + 60)
-
-					# Was it premultiplied?
-					node.knob('premultiplied').fromScript( selectedNodePremult )
-		
-
-					# Debug
-					# print('Read node created for ' + filename)
-				
-
-
-				# Some warning messages
-
-				# If the Write node has not rendered any files to load
-				if fileFound == False:
-					nuke.message('Render file/s not found, seems like you forgot to render them out.')
-
-				# If no framerange was found from an image sequence
-				elif framerangeFound == False:
-					nuke.message('I was unable to figure out the frame range and guessed it was ' + firstFrame + '-' + lastFrame + ', based on the project settings. Please check it manually.')
-
+            height = nuke.toNode(node).screenHeight()
+            xpos = nuke.toNode(node).xpos()
+            ypos = nuke.toNode(node).ypos()
+            r.setXpos(xpos)
+            r.setYpos(ypos + height + 20)
